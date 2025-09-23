@@ -197,7 +197,11 @@ async fn handle_socket_read(
 }
 
 async fn run_discovery_server() -> io::Result<()> {
-    let socket = UdpSocket::bind(("0:0:0:0:{}", terminal_chat::DISCOVERY_PORT)).await?;
+    let discovery_addr = SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+        terminal_chat::DISCOVERY_PORT,
+    );
+    let socket = UdpSocket::bind(discovery_addr).await?;
     log::info!(
         "Discovery service listening on port {}",
         terminal_chat::DISCOVERY_PORT
@@ -208,7 +212,7 @@ async fn run_discovery_server() -> io::Result<()> {
         Err(e) => {
             log::error!("Failed to get local IP: {}", e);
             return Err(io::Error::new(io::ErrorKind::AddrNotAvailable, e));
-        },
+        }
     };
     let port = SERVER_SOCKET.port();
     let server_tcp_addr = format!("{}:{}", server_ip_addr, port);
@@ -220,7 +224,9 @@ async fn run_discovery_server() -> io::Result<()> {
 
         if &buf[..len] == terminal_chat::DISCOVERY_MESSAGE {
             log::info!("Replying to discovery message from {}", client_addr);
-            socket.send_to(server_tcp_addr.as_bytes(), client_addr).await?;
+            socket
+                .send_to(server_tcp_addr.as_bytes(), client_addr)
+                .await?;
         }
     }
 }

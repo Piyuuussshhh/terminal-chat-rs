@@ -21,7 +21,6 @@ const SERVER_CAPACITY: usize = 10;
 const SERVER_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080);
 const SERVER_ID: Uuid = Uuid::nil();
 const SERVER_NAME: &str = "HouseChat";
-const SERVER_ADDR: &str = "0.0.0.0:8080";
 
 #[tokio::main]
 async fn main() -> terminal_chat::HouseChatResult<()> {
@@ -30,11 +29,17 @@ async fn main() -> terminal_chat::HouseChatResult<()> {
         Err(e) => panic!("[ERROR] Could not create log file: {e}"),
     }
 
-    // Run the discovery server, so that clients running on different devices in the home network can find the server.
-    tokio::spawn(run_discovery_server());
+    // Run the discovery server, so that clients running on different devices in the home network can find the server
+    let discovery_handle = tokio::spawn(run_discovery_server());
 
-    let tcp_listener = TcpListener::bind(SERVER_ADDR).await?;
-    log::info!("Server is ready to accept connections on {SERVER_ADDR}");
+    let tcp_listener = TcpListener::bind(SERVER_SOCKET).await?;
+    log::info!("Server is ready to accept connections on {SERVER_SOCKET}");
+
+    // This only executes if the discovery server crashed
+    if discovery_handle.is_finished() {
+        // I've made it so that if the discovery server crashes, the whole server crashes
+        discovery_handle.await??;
+    }
 
     let (tx, _) = broadcast::channel::<MessageProtocol>(SERVER_CAPACITY);
 
@@ -192,7 +197,7 @@ async fn handle_socket_read(
 }
 
 async fn run_discovery_server() -> io::Result<()> {
-    let socket = UdpSocket::bind((SERVER_ADDR, terminal_chat::DISCOVERY_PORT)).await?;
+    let socket = UdpSocket::bind(("0:0:0:0:{}", terminal_chat::DISCOVERY_PORT)).await?;
     log::info!(
         "Discovery service listening on port {}",
         terminal_chat::DISCOVERY_PORT
@@ -205,7 +210,7 @@ async fn run_discovery_server() -> io::Result<()> {
             return Err(io::Error::new(io::ErrorKind::AddrNotAvailable, e));
         },
     };
-    let port = SERVER_ADDR.split(':').last().unwrap_or("8080");
+    let port = SERVER_SOCKET.port();
     let server_tcp_addr = format!("{}:{}", server_ip_addr, port);
 
     let mut buf = [0; 1024];

@@ -58,9 +58,9 @@ async fn find_server() -> io::Result<SocketAddr> {
         // Network error
         Ok(Err(e)) => Err(e),
         // Timeout
-        Err(_) => Err(io::Error::new(
+        Err(e) => Err(io::Error::new(
             io::ErrorKind::TimedOut,
-            "Server discovery timed out.",
+            format!("Server discovery timed out: {e}"),
         )),
     }
 }

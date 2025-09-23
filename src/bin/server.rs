@@ -1,13 +1,14 @@
+use local_ip_address::local_ip;
 use log::LevelFilter;
 use simplelog::{Config, WriteLogger};
 use std::{
-    error::Error,
     fs::File,
+    io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
-    net::{TcpListener, TcpStream, tcp::WriteHalf},
+    net::{TcpListener, TcpStream, UdpSocket, tcp::WriteHalf},
     signal,
     sync::broadcast::{self, Sender, error::RecvError},
 };
@@ -23,11 +24,14 @@ const SERVER_NAME: &str = "HouseChat";
 const SERVER_ADDR: &str = "0.0.0.0:8080";
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> terminal_chat::HouseChatResult<()> {
     match init_log() {
         Ok(_) => {}
         Err(e) => panic!("[ERROR] Could not create log file: {e}"),
     }
+
+    // Run the discovery server, so that clients running on different devices in the home network can find the server.
+    tokio::spawn(run_discovery_server());
 
     let tcp_listener = TcpListener::bind(SERVER_ADDR).await?;
     log::info!("Server is ready to accept connections on {SERVER_ADDR}");
@@ -61,7 +65,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn init_log() -> Result<(), Box<dyn Error>> {
+fn init_log() -> terminal_chat::HouseChatResult<()> {
     let file = File::create(LOG_FILE)?;
     WriteLogger::init(LevelFilter::Info, Config::default(), file)?;
     Ok(())
@@ -71,7 +75,7 @@ async fn handle_client(
     mut tcp_stream: TcpStream,
     tx: Sender<MessageProtocol>,
     client_addr: SocketAddr,
-) -> Result<(), Box<dyn Error>> {
+) -> terminal_chat::HouseChatResult<()> {
     log::info!("Handling socket connection from client {}", client_addr);
 
     let id = Uuid::new_v4();
@@ -141,7 +145,7 @@ async fn read_channel(
     res: Result<MessageProtocol, RecvError>,
     writer: &mut BufWriter<WriteHalf<'_>>,
     id: &Uuid,
-) -> Result<(), Box<dyn Error>> {
+) -> terminal_chat::HouseChatResult<()> {
     match res {
         Ok(msg) => {
             log::info!("[{}]: {:?}", id, msg);
@@ -164,7 +168,7 @@ async fn handle_socket_read(
     incoming: &String,
     tx: Sender<MessageProtocol>,
     client_addr: SocketAddr,
-) -> Result<(), Box<dyn Error>> {
+) -> terminal_chat::HouseChatResult<()> {
     log::info!(
         "[{id}]: incoming: {}: size, {num_bytes_read}",
         incoming.trim()
@@ -185,4 +189,33 @@ async fn handle_socket_read(
     );
 
     Ok(())
+}
+
+async fn run_discovery_server() -> io::Result<()> {
+    let socket = UdpSocket::bind((SERVER_ADDR, terminal_chat::DISCOVERY_PORT)).await?;
+    log::info!(
+        "Discovery service listening on port {}",
+        terminal_chat::DISCOVERY_PORT
+    );
+
+    let server_ip_addr = match local_ip() {
+        Ok(addr) => addr,
+        Err(e) => {
+            log::error!("Failed to get local IP: {}", e);
+            return Err(io::Error::new(io::ErrorKind::AddrNotAvailable, e));
+        },
+    };
+    let port = SERVER_ADDR.split(':').last().unwrap_or("8080");
+    let server_tcp_addr = format!("{}:{}", server_ip_addr, port);
+
+    let mut buf = [0; 1024];
+
+    loop {
+        let (len, client_addr) = socket.recv_from(&mut buf).await?;
+
+        if &buf[..len] == terminal_chat::DISCOVERY_MESSAGE {
+            log::info!("Replying to discovery message from {}", client_addr);
+            socket.send_to(server_tcp_addr.as_bytes(), client_addr).await?;
+        }
+    }
 }

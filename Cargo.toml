@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+local-ip-address = "0.6.5"
 log = "0.4.28"
 ratatui = "0.29.0"
 serde = { version = "1.0.226", features = ["derive"] }

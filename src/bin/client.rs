@@ -1,14 +1,9 @@
-use std::{fs::File, io, net::SocketAddr, time::Duration};
-
-use log::LevelFilter;
-use simplelog::{Config, WriteLogger};
+use std::{error::Error, io, net::SocketAddr, time::Duration};
 use tokio::net::{TcpStream, UdpSocket};
 
-const LOG_FILE: &str = "client.log";
-
 #[tokio::main]
-async fn main() -> terminal_chat::HouseChatResult<()> {
-    init_log()?;
+async fn main() -> Result<(), Box<dyn Error>> {
+    terminal_chat::init_log(terminal_chat::CLIENT_LOG_FILE)?;
 
     let server_addr = match find_server().await {
         Ok(addr) => addr,
@@ -20,12 +15,6 @@ async fn main() -> terminal_chat::HouseChatResult<()> {
 
     let stream = TcpStream::connect(server_addr).await?;
 
-    Ok(())
-}
-
-fn init_log() -> terminal_chat::HouseChatResult<()> {
-    let file = File::create(LOG_FILE)?;
-    WriteLogger::init(LevelFilter::Info, Config::default(), file)?;
     Ok(())
 }
 

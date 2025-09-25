@@ -1,8 +1,6 @@
 use local_ip_address::local_ip;
-use log::LevelFilter;
-use simplelog::{Config, WriteLogger};
 use std::{
-    fs::File,
+    error::Error,
     io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
@@ -16,15 +14,14 @@ use uuid::Uuid;
 
 use terminal_chat::protocol::MessageProtocol;
 
-const LOG_FILE: &str = "server.log";
 const SERVER_CAPACITY: usize = 10;
 const SERVER_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080);
 const SERVER_ID: Uuid = Uuid::nil();
 const SERVER_NAME: &str = "HouseChat";
 
 #[tokio::main]
-async fn main() -> terminal_chat::HouseChatResult<()> {
-    match init_log() {
+async fn main() -> Result<(), Box<dyn Error>> {
+    match terminal_chat::init_log(terminal_chat::SERVER_LOG_FILE) {
         Ok(_) => {}
         Err(e) => panic!("[ERROR] Could not create log file: {e}"),
     }
@@ -70,17 +67,11 @@ async fn main() -> terminal_chat::HouseChatResult<()> {
     Ok(())
 }
 
-fn init_log() -> terminal_chat::HouseChatResult<()> {
-    let file = File::create(LOG_FILE)?;
-    WriteLogger::init(LevelFilter::Info, Config::default(), file)?;
-    Ok(())
-}
-
 async fn handle_client(
     mut tcp_stream: TcpStream,
     tx: Sender<MessageProtocol>,
     client_addr: SocketAddr,
-) -> terminal_chat::HouseChatResult<()> {
+) -> Result<(), Box<dyn Error>> {
     log::info!("Handling socket connection from client {}", client_addr);
 
     let id = Uuid::new_v4();
@@ -150,7 +141,7 @@ async fn read_channel(
     res: Result<MessageProtocol, RecvError>,
     writer: &mut BufWriter<WriteHalf<'_>>,
     id: &Uuid,
-) -> terminal_chat::HouseChatResult<()> {
+) -> Result<(), Box<dyn Error>> {
     match res {
         Ok(msg) => {
             log::info!("[{}]: {:?}", id, msg);
@@ -173,7 +164,7 @@ async fn handle_socket_read(
     incoming: &String,
     tx: Sender<MessageProtocol>,
     client_addr: SocketAddr,
-) -> terminal_chat::HouseChatResult<()> {
+) -> Result<(), Box<dyn Error>> {
     log::info!(
         "[{id}]: incoming: {}: size, {num_bytes_read}",
         incoming.trim()

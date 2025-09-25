@@ -4,18 +4,18 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageProtocol {
-    pub sender_addr: SocketAddr,
     pub id: Uuid,
-    pub username: String,
+    pub sender_addr: SocketAddr,
+    pub sender_username: String,
     pub payload: String,
 }
 
 impl MessageProtocol {
-    pub fn new(sender_addr: SocketAddr, id: Uuid, username: String, payload: String) -> Self {
+    pub fn new(id: Uuid, sender_addr: SocketAddr, sender_username: String, payload: String) -> Self {
         Self {
-            sender_addr,
             id,
-            username,
+            sender_addr,
+            sender_username,
             payload
         }
     }
@@ -24,5 +24,14 @@ impl MessageProtocol {
         let mut json = serde_json::to_string(self)?;
         json.push('\n');
         Ok(json)
+    }
+}
+
+impl TryFrom<String> for MessageProtocol {
+    type Error = serde_json::Error;
+
+    fn try_from(json: String) -> Result<Self, Self::Error> {
+        let msg = serde_json::from_str::<MessageProtocol>(&json)?;
+        Ok(msg)
     }
 }

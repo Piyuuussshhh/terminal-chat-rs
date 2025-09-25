@@ -12,7 +12,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use terminal_chat::protocol::MessageProtocol;
+use terminal_chat::{client_model::Client, protocol::MessageProtocol};
 
 const SERVER_CAPACITY: usize = 10;
 const SERVER_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080);
@@ -74,25 +74,22 @@ async fn handle_client(
 ) -> Result<(), Box<dyn Error>> {
     log::info!("Handling socket connection from client {}", client_addr);
 
-    let id = Uuid::new_v4();
     let mut rx = tx.subscribe();
 
     let (reader, writer) = tcp_stream.split();
     let mut reader = BufReader::new(reader);
     let mut writer = BufWriter::new(writer);
 
-    writer
-        .write_all(b"Welcome to HouseChat! Please enter your username:\n")
-        .await?;
-    writer.flush().await?;
-    let mut username = String::new();
-    reader.read_line(&mut username).await?;
-    let username = username.trim().to_string();
-    let join_msg = format!("{} has joined the chat!", username);
+    // Wait for client to send username and password.
+    let mut credentials = String::new();
+    reader.read_line(&mut credentials).await?;
+    let client = Client::try_from(credentials.trim().to_string())?;
+    // TODO: Append a new row in the Users database if this is a new client, else continue.
+    let join_msg = format!("{} has joined the chat!", client.credentials.username);
     log::info!("{}", join_msg);
     if let Err(e) = tx.send(MessageProtocol::new(
-        SERVER_SOCKET,
         SERVER_ID,
+        SERVER_SOCKET,
         SERVER_NAME.to_string(),
         join_msg,
     )) {
@@ -106,7 +103,7 @@ async fn handle_client(
         tokio::select! {
             // Either a client receives messages from other clients
             res = rx.recv() => {
-                read_channel(res, &mut writer, &id).await?;
+                read_channel(res, &mut writer).await?;
             }
             // Or the client sends a message themselves, or the client disconnects
             res = reader.read_line(&mut incoming) => {
@@ -114,21 +111,21 @@ async fn handle_client(
                 if num_bytes_read == 0 {
                     if let Err(e) = tx.send(
                         MessageProtocol::new(
-                            SERVER_SOCKET,
                             SERVER_ID,
+                            SERVER_SOCKET,
                             SERVER_NAME.to_string(),
-                            format!("{} has left the chat!", username)
+                            format!("{} has left the chat!", client.credentials.username)
                         )
                     ) {
                         log::info!(
                             "Could not broadcast the message '{}': {}",
-                            format!("{} has left the chat!", username),
+                            format!("{} has left the chat!", client.credentials.username),
                             e,
                         )
                     }
                     break;
                 }
-                handle_socket_read(&username, num_bytes_read, &id, &incoming, tx, client_addr).await?;
+                handle_client_message(&client.credentials.username, num_bytes_read, &client.id, &incoming, tx, client_addr).await?;
                 incoming.clear();
             }
         }
@@ -140,12 +137,11 @@ async fn handle_client(
 async fn read_channel(
     res: Result<MessageProtocol, RecvError>,
     writer: &mut BufWriter<WriteHalf<'_>>,
-    id: &Uuid,
 ) -> Result<(), Box<dyn Error>> {
     match res {
         Ok(msg) => {
-            log::info!("[{}]: {:?}", id, msg);
             let json = msg.to_json()?;
+            // Send the received message to the client
             writer.write_all(json.as_bytes()).await?;
             writer.flush().await?;
         }
@@ -157,7 +153,7 @@ async fn read_channel(
     Ok(())
 }
 
-async fn handle_socket_read(
+async fn handle_client_message(
     username: &String,
     num_bytes_read: usize,
     id: &Uuid,
@@ -165,24 +161,16 @@ async fn handle_socket_read(
     tx: Sender<MessageProtocol>,
     client_addr: SocketAddr,
 ) -> Result<(), Box<dyn Error>> {
-    log::info!(
-        "[{id}]: incoming: {}: size, {num_bytes_read}",
-        incoming.trim()
-    );
-
     let outgoing = incoming.trim();
 
     let _ = tx.send(MessageProtocol::new(
-        client_addr,
         id.to_owned(),
+        client_addr,
         username.to_owned(),
         outgoing.to_string(),
     ));
 
-    log::info!(
-        "[{id}]: outgoing: {}: size, {num_bytes_read}",
-        outgoing.trim()
-    );
+    log::info!("{} has sent a message of size {num_bytes_read}", username);
 
     Ok(())
 }

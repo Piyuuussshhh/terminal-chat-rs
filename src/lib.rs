@@ -1,9 +1,9 @@
-use std::{error::Error, fs::OpenOptions};
+pub mod protocol;
+pub mod client_model;
 
+use std::{error::Error, fs::OpenOptions};
 use log::LevelFilter;
 use simplelog::{format_description, ConfigBuilder, WriteLogger};
-
-pub mod protocol;
 
 pub const DISCOVERY_PORT: u16 = 8081;
 pub const DISCOVERY_MESSAGE: &[u8] = b"HOUSE_CHAT_SERVER_DISCOVERY";
@@ -16,13 +16,15 @@ pub fn init_log(log_file: &str) -> Result<(), Box<dyn Error>> {
         .create(true)
         .open(log_file)?;
 
-    let config = ConfigBuilder::new()
-        .set_time_format_custom(format_description!(
-            "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond]"
-        ))
-        .build();
+    let mut builder = ConfigBuilder::new();
+    builder.set_time_format_custom(format_description!(
+        "[year]-[month]-[day] [hour]:[minute]:[second]"
+    ));
+    if builder.set_time_offset_to_local().is_err() {
+        log::warn!("Could not determine local time zone. Logging in UTC.");
+    }
 
-    WriteLogger::init(LevelFilter::Info, config, file)?;
+    WriteLogger::init(LevelFilter::Info, builder.build(), file)?;
 
     Ok(())
 }

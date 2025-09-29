@@ -90,6 +90,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fd1289c04a9ea8cb22300a459a72a385d7c73d3259e2ed7dcb2af674838cfa9"
 
 [[package]]
+name = "client"
+version = "0.1.0"
+dependencies = [
+ "housechat",
+ "local-ip-address",
+ "log",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "simplelog",
+ "time",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "compact_str"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -240,6 +256,21 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "housechat"
+version = "0.1.0"
+dependencies = [
+ "local-ip-address",
+ "log",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "simplelog",
+ "time",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "ident_case"
@@ -609,6 +640,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "server"
+version = "0.1.0"
+dependencies = [
+ "housechat",
+ "local-ip-address",
+ "log",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "simplelog",
+ "time",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "signal-hook"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -734,21 +781,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "terminal-chat"
-version = "0.1.0"
-dependencies = [
- "local-ip-address",
- "log",
- "ratatui",
- "serde",
- "serde_json",
- "simplelog",
- "time",
- "tokio",
- "uuid",
 ]
 
 [[package]]

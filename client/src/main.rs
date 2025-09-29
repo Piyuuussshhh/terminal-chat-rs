@@ -1,10 +1,10 @@
 use std::{error::Error, io, net::SocketAddr, time::Duration};
-use terminal_chat::{client_model::Credentials, protocol::MessageProtocol};
+use housechat::{client_model::Credentials, protocol::MessageProtocol};
 use tokio::{io::{AsyncBufReadExt, AsyncWriteExt, BufReader}, net::{TcpStream, UdpSocket}};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    terminal_chat::init_log(terminal_chat::CLIENT_LOG_FILE)?;
+    housechat::init_log(housechat::CLIENT_LOG_FILE)?;
 
     let server_addr = match find_server().await {
         Ok(addr) => addr,
@@ -39,9 +39,9 @@ async fn find_server() -> io::Result<SocketAddr> {
     socket.set_broadcast(true)?;
 
     // Send discovery message
-    let broadcast_addr = format!("255.255.255.255:{}", terminal_chat::DISCOVERY_PORT);
+    let broadcast_addr = format!("255.255.255.255:{}", housechat::DISCOVERY_PORT);
     socket
-        .send_to(terminal_chat::DISCOVERY_MESSAGE, broadcast_addr)
+        .send_to(housechat::DISCOVERY_MESSAGE, broadcast_addr)
         .await?;
     log::info!("Discovery message broadcasted!");
 

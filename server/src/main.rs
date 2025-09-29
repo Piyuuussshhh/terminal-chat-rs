@@ -12,7 +12,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use terminal_chat::{client_model::Client, protocol::MessageProtocol};
+use housechat::{client_model::Client, protocol::MessageProtocol};
 
 const SERVER_CAPACITY: usize = 10;
 const SERVER_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080);
@@ -21,7 +21,7 @@ const SERVER_NAME: &str = "HouseChat";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    match terminal_chat::init_log(terminal_chat::SERVER_LOG_FILE) {
+    match housechat::init_log(housechat::SERVER_LOG_FILE) {
         Ok(_) => {}
         Err(e) => panic!("[ERROR] Could not create log file: {e}"),
     }
@@ -178,12 +178,12 @@ async fn handle_client_message(
 async fn run_discovery_server() -> io::Result<()> {
     let discovery_addr = SocketAddr::new(
         IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
-        terminal_chat::DISCOVERY_PORT,
+        housechat::DISCOVERY_PORT,
     );
     let socket = UdpSocket::bind(discovery_addr).await?;
     log::info!(
         "Discovery service listening on port {}",
-        terminal_chat::DISCOVERY_PORT
+        housechat::DISCOVERY_PORT
     );
 
     let server_ip_addr = match local_ip() {
@@ -201,7 +201,7 @@ async fn run_discovery_server() -> io::Result<()> {
     loop {
         let (len, client_addr) = socket.recv_from(&mut buf).await?;
 
-        if &buf[..len] == terminal_chat::DISCOVERY_MESSAGE {
+        if &buf[..len] == housechat::DISCOVERY_MESSAGE {
             log::info!("Replying to discovery message from {}", client_addr);
             socket
                 .send_to(server_tcp_addr.as_bytes(), client_addr)

@@ -1,9 +1,31 @@
+use housechat::protocol::MessageProtocol;
 use std::{error::Error, io, net::SocketAddr, time::Duration};
-use tokio::{io::{AsyncBufReadExt, AsyncWriteExt, BufReader}, net::{TcpStream, UdpSocket}};
-use housechat::{client_model::Credentials, protocol::MessageProtocol};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    net::{TcpStream, UdpSocket},
+    sync::mpsc::{Receiver, Sender},
+};
+
+use super::ui::comms;
+
+pub async fn discovery_task(tx: Sender<comms::Event>) -> Result<(), Box<dyn Error + Send + Sync>> {
+    match find_server().await {
+        Ok(addr) => {
+            tx.send(comms::Event::ServerFound(addr)).await?;
+        }
+        Err(e) => {
+            tx.send(comms::Event::Error(format!(
+                "Server discovery failed: {}",
+                e.to_string()
+            )))
+            .await?;
+        }
+    }
+    Ok(())
+}
 
 /// Broadcast "I want to connect to the HouseChat server" and the server will reply with its address (ip + port).
-pub async fn find_server() -> io::Result<SocketAddr> {
+async fn find_server() -> io::Result<SocketAddr> {
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
     socket.set_broadcast(true)?;
 
@@ -38,79 +60,80 @@ pub async fn find_server() -> io::Result<SocketAddr> {
     }
 }
 
-pub async fn chat(
-    server_addr: SocketAddr, 
-    credentials: Credentials
-) -> Result<(), Box<dyn Error>> {
-    let stream = TcpStream::connect(server_addr).await?;
-    log::info!("Connected to server at {}.", server_addr);
-    let (reader_half, mut writer) = stream.into_split();
-    let mut reader = BufReader::new(reader_half);
-
-    let mut cred_json = serde_json::to_string(&credentials)?;
-    // Pushed '\n' so that server's reader.read_line() works correctly
-    cred_json.push('\n');
-    writer.write_all(cred_json.as_bytes()).await?;
-    writer.flush().await?;
-    log::info!("Sent client credentials to the server.");
-
-    let mut server_response = String::new();
-    reader.read_line(&mut server_response).await?;
-    let message = MessageProtocol::try_from(server_response)?;
-    print!("[{}]: {}", message.sender_username, message.payload);
-
-    println!("--- You are now in the chat! ---");
-
-    let mut network_buffer = String::new();
-    let mut user_input_buffer = String::new();
-    let tokio_stdin = tokio::io::stdin();
-    let mut tokio_stdin_reader = BufReader::new(tokio_stdin);
-    loop {
-        tokio::select! {
-            // A message is received from the server
-            res = reader.read_line(&mut network_buffer) => {
-                match res {
-                    Ok(0) => {
-                        log::info!("Server has closed the connection. Exiting the application...");
-                        break Ok(());
-                    },
-                    Ok(_) => {
-                        if let Ok(msg) = MessageProtocol::try_from(network_buffer.clone()) {
-                            if msg.sender_username == credentials.username {
-                                println!("[Me]: {}", msg.payload);
-                            } else {
-                                println!("[{}]: {}", msg.sender_username, msg.payload);
-                            }
-                        }
-                        network_buffer.clear();
-                    },
-                    Err(e) => {
-                        log::error!("Error reading from the server: {e}");
-                        break Err(Box::new(e));
-                    },
-                }
+/// Connects to the TCP server, then relays user action from the TUI to the server AND messages sent by the server to the TUI.
+pub async fn network_task(
+    mut action_rx: Receiver<comms::Action>,
+    event_tx: Sender<comms::Event>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if let Some(comms::Action::Connect {
+        server_addr,
+        credentials,
+    }) = action_rx.recv().await
+    {
+        let stream = match TcpStream::connect(server_addr).await {
+            Ok(stream) => stream,
+            Err(e) => {
+                event_tx.send(comms::Event::Error(e.to_string())).await?;
+                return Ok(());
             }
-            // The client has sent a message to the server
-            res = tokio_stdin_reader.read_line(&mut user_input_buffer) => {
-                match res {
-                    Ok(_) => {
-                        let input = user_input_buffer.trim();
-                        if input == ":q" {
-                            println!("Disconnecting...");
-                            log::info!("{} has decided to stop chatting.", credentials.username);
-                            break Ok(());
-                        }
-                        // Send the original buffer before being trimmed to the server because the server expects the \n
-                        writer.write_all(user_input_buffer.as_bytes()).await?;
-                        writer.flush().await?;
-                        user_input_buffer.clear();
-                    },
-                    Err(e) => {
-                        log::error!("Error reading from stdin: {e}");
-                        break Err(Box::new(e));
-                    },
+        };
+
+        let (reader_half, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader_half);
+
+        let mut cred_json = serde_json::to_string(&credentials)?;
+        // Pushed '\n' so that server's reader.read_line() works correctly
+        cred_json.push('\n');
+        writer.write_all(cred_json.as_bytes()).await?;
+        writer.flush().await?;
+        log::info!("Sent client credentials to the server.");
+
+        let mut server_response = String::new();
+        reader.read_line(&mut server_response).await?;
+        let server_response = serde_json::from_str::<MessageProtocol>(&server_response)?;
+        event_tx
+            .send(comms::Event::Connected(server_response))
+            .await?;
+
+        let mut network_buffer = String::new();
+        loop {
+            tokio::select! {
+                // Handle incoming messages from the server
+                res = reader.read_line(&mut network_buffer) => {
+                    match res {
+                        Ok(0) => {
+                            event_tx.send(comms::Event::Error("Server closed connection".to_string())).await?;
+                            break;
+                        },
+                        Ok(_) => {
+                            if let Ok(msg) = serde_json::from_str::<MessageProtocol>(&network_buffer) {
+                                event_tx.send(comms::Event::ServerMessage(msg)).await?;
+                            }
+                            break;
+                        },
+                        Err(e) => {
+                            event_tx.send(comms::Event::Error(e.to_string())).await?;
+                        },
+                    }
+                },
+                // Handle actions sent by the TUI (sending client's own messages & disconnection)
+                Some(action) = action_rx.recv() => {
+                    match action {
+                        comms::Action::ClientMessage(mut msg) => {
+                            msg.push('\n');
+                            if writer.write_all(msg.as_bytes()).await.is_err() {
+                                event_tx.send(comms::Event::Error("Failed to send message".to_string())).await?;
+                                break;
+                            }
+                        },
+                        comms::Action::Disconnect => {
+                            break;
+                        },
+                        _ => {},
+                    }
                 }
             }
         }
     }
+    Ok(())
 }

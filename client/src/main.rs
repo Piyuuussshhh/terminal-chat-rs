@@ -1,37 +1,100 @@
+mod input;
 mod networking;
 mod ui;
 
-use std::error::Error;
-use housechat::{client_model::Credentials};
+use ratatui::{
+    Terminal,
+    crossterm::{
+        event::{DisableMouseCapture, EnableMouseCapture},
+        execute,
+        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    },
+    prelude::CrosstermBackend,
+};
+use std::{
+    error::Error,
+    io::{self, Stdout},
+    time::Duration,
+};
+use tokio::sync::mpsc;
+
+use crate::{
+    input::input_task,
+    networking::{discovery_task, network_task},
+    ui::{
+        app::{App, CurrentScreen},
+        comms,
+        screens::ui,
+    },
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    housechat::init_log(housechat::CLIENT_LOG_FILE)?;
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
-    let server_addr = match networking::find_server().await {
-        Ok(addr) => addr,
-        Err(e) => {
-            eprintln!("Error discovering server: {}", e);
-            return Ok(());
-        }
-    };
+    let res = run_app(&mut terminal).await;
 
-    println!("Please enter your username:");
-    let mut username = String::new();
-    std::io::stdin().read_line(&mut username)?;
-    let username = username.trim().to_string();
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
 
-    println!("Please enter your password:");
-    let mut password = String::new();
-    std::io::stdin().read_line(&mut password)?;
-    let password = password.trim().to_string();
-
-    let credentials = Credentials::new(username, password);
-
-    if let Err(e) = networking::chat(server_addr, credentials).await {
-        eprintln!("[ERROR] Chat session ended with an error: {}", e);
+    if let Err(err) = res {
+        eprintln!("\n[ERROR] Housechat exited with an error: {err}");
     }
 
     Ok(())
 }
 
+async fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<(), Box<dyn Error>> {
+    housechat::init_log(housechat::CLIENT_LOG_FILE)?;
+
+    let mut app = App::new(None);
+    let (event_tx, mut event_rx) = mpsc::channel::<comms::Event>(100);
+    let (action_tx, action_rx) = mpsc::channel::<comms::Action>(100);
+    let mut tick_interval = tokio::time::interval(Duration::from_millis(100));
+
+    tokio::spawn(discovery_task(event_tx.clone()));
+    input_task(event_tx.clone());
+    tokio::spawn(network_task(action_rx, event_tx));
+
+    // Main TUI loop
+    loop {
+        terminal.draw(|frame| ui(frame, &app))?;
+
+        tokio::select! {
+            Some(event) = event_rx.recv() => {
+                match event {
+                    comms::Event::ServerFound(socket_addr) => {
+                        app.server_addr = Some(socket_addr);
+                        app.current_screen = CurrentScreen::Signin;
+                    },
+                    comms::Event::Connected(server_response) => {
+                        app.chats.push(server_response);
+                        app.current_screen = CurrentScreen::Chat;
+                    },
+                    comms::Event::KeyPress(key_event) => app.handle_key_event(key_event, action_tx.clone()).await?,
+                    comms::Event::ServerMessage(msg) => app.chats.push(msg),
+                    comms::Event::Error(e) => app.error_msg = Some(e),
+                    _ => {},
+                }
+            },
+            _ = tick_interval.tick() => {
+                app.tick();
+            }
+        }
+
+        if app.should_quit {
+            break;
+        }
+    }
+
+    Ok(())
+}

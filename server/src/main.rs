@@ -16,8 +16,6 @@ use housechat::{client_model::Client, protocol::MessageProtocol};
 
 const SERVER_CAPACITY: usize = 10;
 const SERVER_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080);
-const SERVER_ID: Uuid = Uuid::nil();
-const SERVER_NAME: &str = "HouseChat";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -88,9 +86,9 @@ async fn handle_client(
     let join_msg = format!("{} has joined the chat!", client.credentials.username);
     log::info!("{}", join_msg);
     if let Err(e) = tx.send(MessageProtocol::new(
-        SERVER_ID,
+        housechat::SERVER_ID,
         SERVER_SOCKET,
-        SERVER_NAME.to_string(),
+        housechat::SERVER_NAME.to_string(),
         join_msg,
     )) {
         log::warn!("Failed to broadcast join message: {}", e);
@@ -111,9 +109,9 @@ async fn handle_client(
                 if num_bytes_read == 0 {
                     if let Err(e) = tx.send(
                         MessageProtocol::new(
-                            SERVER_ID,
+                            housechat::SERVER_ID,
                             SERVER_SOCKET,
-                            SERVER_NAME.to_string(),
+                            housechat::SERVER_NAME.to_string(),
                             format!("{} has left the chat!", client.credentials.username)
                         )
                     ) {
